@@ -13,7 +13,8 @@ use std::any::Any;
 /// make SQL queries safer.
 #[derive(Clone)]
 pub struct Sql<'a> {
-    code: String,
+    query: String,
+    fragment: String,
     params: Vec<&'a dyn Any>,
 }
 
@@ -31,25 +32,76 @@ impl<'a> Sql<'a> {
         };
 
         Self {
-            code: fragment.to_owned(),
+            query: String::new(),
+            fragment: fragment.to_owned(),
             params,
         }
     }
 
-    pub fn append(mut self, sql: &'a Sql) -> Sql<'a> {
+    /// Add another [Sql] object to the end of this object.
+    /// 
+    /// The string fragment of the ``sql`` object is concatenated to this one
+    /// and the parameters from the ``sql`` are also added to the end of the
+    /// parameter list of this object.
+    /// 
+    /// # Returns
+    /// The current instance of [Sql] with the added parts.
+    pub fn append(mut self, sql: Sql<'a>) -> Sql<'a> {
         let mut params = sql.params().to_vec();
-        self.code += &sql.code;
+        self.fragment.push(' ');
+        self.fragment += &sql.fragment;
         self.params.append(&mut params);
 
         self
     }
 
+    /// The string fragment.
+    /// 
+    /// # Retruns
+    /// The string fragment stored in the [Sql] object.
     pub fn query(&self) -> String {
-        self.code.clone()
+        self.fragment.clone()
     }
 
+    /// The list of parameters.
+    /// 
+    /// # Returns
+    /// A vector containing the parameters to be inserted into the query.
     pub fn params(&self) -> Vec<&'a dyn Any> {
         self.params.clone()
+    }
+
+    /// The final formatted query
+    /// 
+    /// # Returns
+    /// A string containing the formatted query to be passed into a query engine.
+    pub fn formatted(&self) -> String {
+        self.query.clone()
+    }
+
+    /// Finalize the query.
+    /// 
+    /// The query parameters in the query string will be numbered. Each ``?`` in
+    /// the query string will be changed into a ``$`` followed by a number denoting
+    /// the position of the parameter to be substituted (beginning with 1, not 0).
+    pub fn finalize(mut self) -> Sql<'a> {
+        let mut idx = 1;
+        let mut query = String::new();
+        for ch in self.fragment.chars() {
+            if ch == '?' {
+                query += &format!("${idx}");
+                idx += 1;
+            } else {
+                query.push(ch);
+            }
+        }
+        self.query = query;
+
+        self
+    }
+
+    pub fn identifier(arg: & str) -> String {
+        format!(r#""{arg}""#)
     }
 }
 
@@ -108,23 +160,31 @@ mod tests {
     #[test]
     fn string_and_integer_parameter() {
         let one = 1;
-        let sql = Sql::new("UPDATE TABLE %s SET one=%s", Some(&mut [&"foo", &one]));
+        let name = Sql::identifier("foo");
+        let sql = Sql::new("UPDATE TABLE", None)
+            .append(Sql::new(&name, None))
+            .append(Sql::new("SET name=?, one=?", Some(&mut [&name, &one])));
 
         assert_eq!(
-            "UPDATE TABLE %s SET one=%s",
+            "UPDATE TABLE \"foo\" SET name=?, one=?",
             sql.query(),
             "Sql object statement() returns the fragment part"
         );
         let params = sql.params();
         assert_eq!(
-            *params[0].downcast_ref::<&str>().unwrap(),
-            "foo",
+            *params[0].downcast_ref::<String>().unwrap(),
+            r#""foo""#,
             "The first parameter is &str"
         );
         assert_eq!(
             *params[1].downcast_ref::<i32>().unwrap(),
             1,
             "The second parameter is an int"
+        );
+        assert_eq!(
+            "UPDATE TABLE \"foo\" SET name=$1, one=$2",
+            sql.finalize().formatted(),
+            "Sql object statement() returns the fragment part"
         );
     }
 }
