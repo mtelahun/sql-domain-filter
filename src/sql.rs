@@ -25,7 +25,7 @@ impl<'a> Sql<'a> {
     ///
     /// # returns
     /// A new [Sql] object.
-    pub fn new(fragment: &'a str, params: Option<&mut [&'a dyn Any]>) -> Sql<'a> {
+    pub fn new<S: AsRef<str>>(fragment: S, params: Option<&mut [&'a dyn Any]>) -> Sql<'a> {
         let params = match params {
             Some(args) => args.to_vec(),
             None => Vec::new(),
@@ -33,7 +33,7 @@ impl<'a> Sql<'a> {
 
         Self {
             query: String::new(),
-            fragment: fragment.to_owned(),
+            fragment: String::from(fragment.as_ref()),
             params,
         }
     }
@@ -71,7 +71,7 @@ impl<'a> Sql<'a> {
         self.params.clone()
     }
 
-    /// The final formatted query
+    /// The final number-formatted query string.
     /// 
     /// # Returns
     /// A string containing the formatted query to be passed into a query engine.
@@ -79,7 +79,7 @@ impl<'a> Sql<'a> {
         self.query.clone()
     }
 
-    /// Finalize the query.
+    /// Finalize the query string.
     /// 
     /// The query parameters in the query string will be numbered. Each ``?`` in
     /// the query string will be changed into a ``$`` followed by a number denoting
@@ -100,8 +100,17 @@ impl<'a> Sql<'a> {
         self
     }
 
-    pub fn identifier(arg: & str) -> String {
-        format!(r#""{arg}""#)
+    /// # Returns
+    /// An identifier (like a table name or column) wrapped in a [Sql] object.
+    /// 
+    /// ```
+    /// # use sql_domain_filter::sql::Sql;
+    /// let table_name: Sql<'_> = Sql::identifier("users");
+    /// 
+    /// assert_eq!("\"users\"", table_name.query())
+    /// ```
+    pub fn identifier(arg: &'a str) -> Sql<'a> {
+        Self::new(format!(r#""{arg}""#), None)
     }
 }
 
@@ -148,7 +157,7 @@ mod tests {
         assert_eq!(
             "CREATE TABLE %s()",
             sql.query(),
-            "Sql object statement() returns the fragment part"
+            "Sql.query() returns the fragment part"
         );
         assert_eq!(
             *sql.params().pop().unwrap().downcast_ref::<&str>().unwrap(),
@@ -160,21 +169,20 @@ mod tests {
     #[test]
     fn string_and_integer_parameter() {
         let one = 1;
-        let name = Sql::identifier("foo");
         let sql = Sql::new("UPDATE TABLE", None)
-            .append(Sql::new(&name, None))
-            .append(Sql::new("SET name=?, one=?", Some(&mut [&name, &one])));
+            .append(Sql::identifier("foo"))
+            .append(Sql::new("SET name=?, one=?", Some(&mut [&"foo", &one])));
 
         assert_eq!(
             "UPDATE TABLE \"foo\" SET name=?, one=?",
             sql.query(),
-            "Sql object statement() returns the fragment part"
+            "Sql.query() returns the fragment part"
         );
         let params = sql.params();
         assert_eq!(
-            *params[0].downcast_ref::<String>().unwrap(),
-            r#""foo""#,
-            "The first parameter is &str"
+            *params[0].downcast_ref::<&str>().unwrap(),
+            "foo",
+            "The first parameter is 'foo'"
         );
         assert_eq!(
             *params[1].downcast_ref::<i32>().unwrap(),
